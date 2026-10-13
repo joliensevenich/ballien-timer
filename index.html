@@ -358,6 +358,15 @@ input[type=date]::-webkit-date-and-time-value, input[type=time]::-webkit-date-an
 .spinner { width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid var(--fill-2); border-top-color: var(--accent); animation: spin 0.8s linear infinite; display: inline-block; vertical-align: middle; margin-right: 8px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Uitleg bij Scan tekst van iOS */
+.scan-tip { position: relative; margin: 0 16px 10px; padding: 12px 14px; border-radius: 12px; background: var(--accent-soft); font-size: 15px; }
+.form-card .scan-tip { margin: 0 0 10px; }
+.scan-tip-text { display: flex; gap: 10px; align-items: flex-start; }
+.scan-tip-text .i { color: var(--accent); font-size: 22px; flex: none; margin-top: 1px; }
+.scan-tip-sub { display: block; color: var(--text-2); font-size: 13px; margin-top: 3px; }
+.scan-tip-actions { display: flex; gap: 16px; justify-content: flex-end; margin-top: 8px; }
+.scan-tip-actions button { color: var(--accent); font-size: 15px; padding: 4px 0; }
+
 /* Live scannen */
 .sheet.dark { background: #000; color: #fff; }
 .sheet.dark .navbar { background: rgba(0, 0, 0, .6); color: #fff; }

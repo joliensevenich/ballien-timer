@@ -71,13 +71,60 @@ function bindScanButtons(root) {
   for (const btn of $$('[data-scan]', root)) {
     btn.addEventListener('click', () => {
       const input = $('#' + btn.dataset.scan, root);
-      startScan(btn.dataset.subject, text => {
+      const fill = text => {
         input.value = text;
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
-      });
+      };
+      // Op een iPhone: de tekstscanner van Apple zelf (Scan tekst), die veel beter leest.
+      if (isIOS()) showAppleScanTip(input, btn.dataset.subject, () => startScan(btn.dataset.subject, fill));
+      else startScan(btn.dataset.subject, fill);
     });
   }
+}
+
+/**
+ * Zet het veld klaar voor "Scan tekst" van iOS en toont onder het veld waar je moet tikken.
+ * Een website kan die scanner niet zelf openen; je tikt nog één keer in het veld.
+ */
+function showAppleScanTip(input, subject, useOther) {
+  $$('.scan-tip').forEach(t => t.remove());
+  const row = input.closest('.row');
+  const old = input.value;
+  // Leeg veld: dan staat Scan tekst meteen in het menu, en de gescande tekst vervangt de oude.
+  if (old) {
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  input.focus();
+  const tip = el(`<div class="scan-tip" role="status">
+    <div class="scan-tip-text">${icon('scan')}<span>Tik nog eens in het veld en kies <b>Scan tekst</b>
+      <span class="scan-tip-sub">(staat soms onder <b>Automatisch invullen</b>). Richt de camera op ${subject === 'werfnummer' ? 'het' : 'de'} ${esc(subject)} en tik op <b>Voeg in</b>.</span></span></div>
+    <div class="scan-tip-actions">
+      ${old ? '<button type="button" data-act="undo">Vorige tekst terug</button>' : ''}
+      <button type="button" data-act="other">Andere scanner</button>
+    </div>
+  </div>`);
+  row.after(tip);
+  let closing = null;
+  const close = () => { tip.remove(); input.removeEventListener('input', onInput); input.removeEventListener('blur', onBlur); };
+  // Na het scannen (of typen) verdwijnt de uitleg.
+  const onInput = () => { if (input.value) close(); };
+  // Even wachten bij het verlaten van het veld, zodat de knoppen in de uitleg nog werken.
+  const onBlur = () => { closing = setTimeout(close, 400); };
+  input.addEventListener('input', onInput);
+  input.addEventListener('blur', onBlur);
+  $$('button', tip).forEach(b => b.addEventListener('click', () => {
+    clearTimeout(closing);
+    close();
+    if (b.dataset.act === 'undo') {
+      input.value = old;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+      useOther();
+    }
+  }));
 }
 
 function autosize(textarea) {
@@ -1742,16 +1789,50 @@ async function start() {
   showInstallGate();
 
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) return;
+    if (document.hidden) {
+      // Nieuwe versie klaar: vernieuwen terwijl de app op de achtergrond staat.
+      if (updateReady) location.reload();
+      return;
+    }
     refreshAll();
     checkBackupReminder();
+    checkForUpdate();
   });
   setTimeout(checkBackupReminder, 600);
   loadLogo();
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch(err => console.warn('Offline niet beschikbaar:', err));
+    const hadVersion = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js').then(watchUpdates).catch(err => console.warn('Offline niet beschikbaar:', err));
+    // Een nieuwe versie is binnen: meteen vernieuwen, tenzij je iets aan het invullen bent.
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadVersion) return;
+      const typing = document.activeElement?.matches?.('input, textarea, select');
+      if (!isOverlayOpen() && !typing) location.reload();
+      else updateReady = true;
+    });
   }
+}
+
+// MARK: - Updates
+// Een app op het beginscherm blijft vaak op de achtergrond openstaan. Daarom kijkt hij elke keer dat
+// je hem opent of er een nieuwe versie online staat.
+
+let updateReady = false;
+
+function checkForUpdate() {
+  if (!navigator.onLine) return;
+  navigator.serviceWorker?.getRegistration().then(reg => reg?.update()).catch(() => {});
+}
+
+/** Een nieuwe versie die klaarstaat, meteen actief maken. */
+function watchUpdates(reg) {
+  const activate = () => reg.waiting?.postMessage('skipWaiting');
+  activate();
+  reg.addEventListener('updatefound', () => {
+    const worker = reg.installing;
+    worker?.addEventListener('statechange', () => { if (worker.state === 'installed') activate(); });
+  });
 }
 
 start();

@@ -1,6 +1,6 @@
 // Bewaart de app op het toestel, zodat hij ook zonder internet werkt.
 // Verhoog VERSION bij elke nieuwe versie: dan haalt de app de nieuwe bestanden op.
-const VERSION = 'timer-v4';
+const VERSION = 'timer-v6';
 const FILES = [
   './',
   'index.html',
@@ -23,7 +23,15 @@ const FILES = [
 ];
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(VERSION).then(cache => cache.addAll(FILES)).then(() => self.skipWaiting()));
+  // 'reload': altijd de nieuwste bestanden van de server, niet uit de tussenopslag van de browser.
+  event.waitUntil(caches.open(VERSION)
+    .then(cache => cache.addAll(FILES.map(f => new Request(f, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
+});
+
+// De app vraagt een klaarstaande nieuwe versie om meteen actief te worden.
+self.addEventListener('message', event => {
+  if (event.data === 'skipWaiting') self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {

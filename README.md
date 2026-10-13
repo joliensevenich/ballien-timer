@@ -8,7 +8,7 @@ Werkt op iPhone, Android en computer, ook offline.
 - Excel en PDF in de layout van het **Weekrapport - Atelier**, net als in de iPhone-app.
 
 Verschillen met de iPhone-app:
-- **Scannen**: de scanknop opent de camera met een richtkader; de tekst in het kader wordt live gelezen en met één tik overgenomen. Via *Foto* kan het ook met een foto (bij handschrift: in het tekstveld tikken en *Scan tekst* van de iPhone kiezen).
+- **Scannen**: op een iPhone zet de scanknop het veld klaar voor **Scan tekst**, de tekstscanner van Apple zelf (dezelfde als in de iPhone-app, leest ook handschrift). Je tikt nog één keer in het veld en kiest *Scan tekst*. Via *Andere scanner* kan ook de scanner van de app zelf (camera met richtkader of foto); op Android is dat de standaard.
 - **Wekelijkse herinnering**: een website kan geen melding plannen. De app vraagt om een back-up wanneer je hem opent nadat het gekozen moment voorbij is.
 
 ## Online zetten met GitHub Pages (gratis)
@@ -37,6 +37,10 @@ Overstappen van de iPhone-app: maak daar in Instellingen een back-up, en zet die
 
 ## Een nieuwe versie online zetten
 
-1. Verhoog in `sw.js` het nummer in `const VERSION = 'timer-v4'` (bijvoorbeeld naar `timer-v5`).
-2. Upload de gewijzigde bestanden opnieuw naar GitHub.
-3. Gebruikers krijgen de nieuwe versie de tweede keer dat ze de app openen terwijl ze internet hebben.
+1. Verhoog in `sw.js` het nummer in `const VERSION = 'timer-v6'` (bijvoorbeeld naar `timer-v7`). Zonder nieuw nummer krijgen gebruikers de nieuwe versie niet.
+2. Upload de gewijzigde bestanden opnieuw naar GitHub. GitHub zet ze binnen 1 à 2 minuten online (zie het tabblad *Actions*).
+3. De app kijkt telkens hij geopend wordt of er een nieuwe versie is, haalt die op de achtergrond op en vernieuwt zichzelf
+   zodra je niets aan het invullen bent. Je uren blijven daarbij gewoon bewaard.
+
+GitHub kan bestanden tot 10 minuten in de tussenopslag houden. Zie je de nieuwe versie niet meteen: sluit de app helemaal
+(veeg hem omhoog in het appoverzicht) en open hem na een paar minuten opnieuw.
