@@ -37,6 +37,7 @@ const ICONS = {
   camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/>',
   photo: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
   phone: '<rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/>',
+  flash: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
   minus: '<circle cx="12" cy="12" r="10" fill="currentColor" stroke="none"/><path d="M8 12h8" stroke="#fff"/>',
   addhome: '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/>',
   clockq: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l3 2"/><path d="M17 17.5h.01"/>',
@@ -70,7 +71,7 @@ function bindScanButtons(root) {
   for (const btn of $$('[data-scan]', root)) {
     btn.addEventListener('click', () => {
       const input = $('#' + btn.dataset.scan, root);
-      openScanner(btn.dataset.subject, text => {
+      startScan(btn.dataset.subject, text => {
         input.value = text;
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -132,9 +133,9 @@ function makeBackdrop(onClick) {
  * Venster dat van onder openschuift, met links en rechts een knop (zoals een sheet op iOS).
  * left/right: { label, bold, onClick, disabled }
  */
-function openSheet({ title, left, right, body, full = false, onClose }) {
+function openSheet({ title, left, right, body, full = false, dark = false, onClose }) {
   const backdrop = makeBackdrop(full ? null : () => left?.dismiss !== false && close());
-  const sheet = el(`<div class="sheet ${full ? 'full' : ''}" role="dialog" aria-modal="true">
+  const sheet = el(`<div class="sheet ${full ? 'full' : ''} ${dark ? 'dark' : ''}" role="dialog" aria-modal="true">
     <header class="navbar"><div class="navbar-row">
       <div class="navbar-left"></div><div class="navbar-title">${esc(title)}</div><div class="navbar-right"></div>
     </div></header>
@@ -1213,29 +1214,162 @@ function openWorkTypes() {
 }
 
 // MARK: - Scannen
-// Neem een foto van het papier; de herkende tekst krijgt kaders. Tik op een kader om de tekst over te nemen.
+// De scanknop opent meteen de camera. Op de foto krijgt de gevonden tekst kaders; tik op de tekst en dat stuk
+// wordt opnieuw gelezen op volle scherpte, net als de tekstscanner van de iPhone-app.
 
 let ocrWorker = null;
-let ocrProgress = null;
 
 function getOcrWorker() {
   if (!ocrWorker) {
     const base = new URL('vendor/tesseract/', location.href).href;
-    ocrWorker = Tesseract.createWorker('eng', 1, {
+    ocrWorker = Tesseract.createWorker(['nld', 'eng'], 1, {
       workerPath: base + 'worker.min.js',
       corePath: base,
       langPath: base + 'lang',
       workerBlobURL: false,
-      logger: m => ocrProgress?.(m),
+    }).then(async worker => {
+      await worker.setParameters({ preserve_interword_spaces: '1', user_defined_dpi: '300' });
+      return worker;
     }).catch(err => { ocrWorker = null; throw err; });
   }
   return ocrWorker;
 }
 
-/** Tekens die rond een woord niet bij de tekst horen. */
-const cleanScan = s => s.replace(/^[\s|.,:;'"`’‘“”()[\]{}<>«»_~*]+|[\s|.,:;'"`’‘“”()[\]{}<>«»_~*]+$/g, '');
+/** Leest een beeld met een gegeven paginaindeling (7 = één regel, 6 = blok, 11 = losse tekst). */
+let ocrMode = null;
+async function ocr(canvas, mode) {
+  const worker = await getOcrWorker();
+  if (ocrMode !== mode) {
+    await worker.setParameters({ tessedit_pageseg_mode: String(mode) });
+    ocrMode = mode;
+  }
+  const { data } = await worker.recognize(canvas, {}, { text: true, blocks: true });
+  return data;
+}
 
-function ocrLines(data) {
+/** Opent meteen de camera van het toestel. */
+function takePhoto(onPhoto) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.setAttribute('capture', 'environment');
+  input.className = 'hidden';
+  document.body.appendChild(input);
+  input.addEventListener('change', () => { const file = input.files[0]; input.remove(); if (file) onPhoto(file); });
+  input.addEventListener('cancel', () => input.remove());
+  input.click();
+}
+
+/** Laadt een foto rechtop: een <img> volgt de draaiing die de camera in het bestand zet. */
+function loadPhoto(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { resolve(img); setTimeout(() => URL.revokeObjectURL(url), 1000); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Deze foto kan niet geopend worden.')); };
+    img.src = url;
+  });
+}
+
+// Beeldbewerking: grijs, contrast oprekken en schaduwen wegwerken, zodat de tekstherkenning beter leest.
+
+function grayPixels(canvas) {
+  const { width: w, height: h } = canvas;
+  const rgba = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+  const gray = new Uint8ClampedArray(w * h);
+  for (let i = 0, j = 0; i < gray.length; i++, j += 4) gray[i] = (rgba[j] * 77 + rgba[j + 1] * 150 + rgba[j + 2] * 29) >> 8;
+  return gray;
+}
+
+/** Rekt het contrast op tussen de donkerste en lichtste 2 % van de pixels. */
+function stretchContrast(gray) {
+  const hist = new Uint32Array(256);
+  for (const v of gray) hist[v]++;
+  const cut = gray.length * 0.02;
+  let lo = 0, hi = 255, n = 0;
+  while (lo < 255 && (n += hist[lo]) < cut) lo++;
+  n = 0;
+  while (hi > 0 && (n += hist[hi]) < cut) hi--;
+  if (hi - lo < 10) return gray;
+  const out = new Uint8ClampedArray(gray.length);
+  for (let i = 0; i < gray.length; i++) out[i] = (gray[i] - lo) * 255 / (hi - lo);
+  return out;
+}
+
+/** Zwart-wit met een drempel per omgeving (Bradley), zodat schaduwen en ongelijk licht verdwijnen. */
+function adaptiveThreshold(gray, w, h, size, t = 0.15) {
+  const iw = w + 1;
+  const integral = new Float64Array(iw * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let row = 0;
+    for (let x = 0; x < w; x++) {
+      row += gray[y * w + x];
+      integral[(y + 1) * iw + x + 1] = integral[y * iw + x + 1] + row;
+    }
+  }
+  const out = new Uint8ClampedArray(gray.length);
+  const r = Math.max(4, Math.floor(size / 2));
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r), y1 = Math.min(h - 1, y + r);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(w - 1, x + r);
+      const count = (x1 - x0 + 1) * (y1 - y0 + 1);
+      const sum = integral[(y1 + 1) * iw + x1 + 1] - integral[y0 * iw + x1 + 1] - integral[(y1 + 1) * iw + x0] + integral[y0 * iw + x0];
+      out[y * w + x] = gray[y * w + x] * count <= sum * (1 - t) ? 0 : 255;
+    }
+  }
+  return out;
+}
+
+function grayCanvas(gray, w, h) {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(w, h);
+  for (let i = 0, j = 0; i < gray.length; i++, j += 4) {
+    img.data[j] = img.data[j + 1] = img.data[j + 2] = gray[i];
+    img.data[j + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
+/** Tekent een stuk van `source` op schaal `scale`, met witte rand. */
+function cropCanvas(source, x, y, w, h, scale, border = 0) {
+  // Een <video> of <img> heeft zijn echte afmetingen in videoWidth of naturalWidth.
+  const sw = source.videoWidth || source.naturalWidth || source.width;
+  const sh = source.videoHeight || source.naturalHeight || source.height;
+  x = Math.max(0, Math.floor(x));
+  y = Math.max(0, Math.floor(y));
+  w = Math.min(sw - x, Math.ceil(w));
+  h = Math.min(sh - y, Math.ceil(h));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w * scale) + border * 2);
+  c.height = Math.max(1, Math.round(h * scale) + border * 2);
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(source, x, y, w, h, border, border, w * scale, h * scale);
+  return c;
+}
+
+/** Tekens die rond een woord niet bij de tekst horen. */
+const cleanScan = s => s.replace(/\s+/g, ' ')
+  .replace(/^[\s|.,:;'"`’‘“”()[\]{}<>«»_~*]+|[\s|.,:;'"`’‘“”()[\]{}<>«»_~*]+$/g, '');
+
+/** Werfnummers: geen spaties rond - en /, en letters die op cijfers lijken worden cijfers. */
+function cleanNumber(s) {
+  s = s.replace(/\s*([-/])\s*/g, '$1');
+  return s.split(' ').map(token => {
+    const digits = (token.match(/\d/g) ?? []).length;
+    if (digits < token.replace(/[-/.]/g, '').length / 2) return token;
+    return token.replace(/[Oo]/g, '0').replace(/[Il|]/g, '1').replace(/[Ss]/g, '5').replace(/B/g, '8');
+  }).join(' ');
+}
+
+function ocrLines(data, minConf = 25) {
   let lines = data.lines;
   if (!lines?.length && data.blocks) {
     lines = data.blocks.flatMap(b => (b.paragraphs ?? []).flatMap(p => p.lines ?? []));
@@ -1245,99 +1379,309 @@ function ocrLines(data) {
     bbox: l.bbox,
     conf: l.confidence ?? 100,
     words: (l.words ?? []).map(w => cleanScan(w.text ?? '')).filter(Boolean),
-  })).filter(l => l.text && l.conf > 25);
+  })).filter(l => l.text && l.conf > minConf);
 }
 
-function openScanner(subject, onScan) {
-  const title = `${capitalize(subject)} scannen`;
-  const body = el(`<div>
-    <div class="scan-intro">${icon('camera')}<div>Neem een foto van het papier. Daarna tik je op de ${esc(subject)}.</div></div>
-    <div class="content stack">
-      <button class="btn accent" type="button" id="sc-camera">${icon('camera')}Foto nemen</button>
-      <button class="btn tinted" type="button" id="sc-library">${icon('photo')}Kies een foto</button>
+/** Opent de camera, en daarna de foto om op de tekst te tikken. */
+function startScan(subject, onScan) {
+  if (navigator.mediaDevices?.getUserMedia) openLiveScanner(subject, onScan);
+  else takePhoto(file => openScanResult(subject, file, onScan));
+}
+
+/**
+ * Live scannen: de camera in beeld met een richtkader. Wat in het kader staat, wordt telkens opnieuw gelezen;
+ * tik op de herkende tekst om ze over te nemen.
+ */
+function openLiveScanner(subject, onScan) {
+  const the = subject === 'werfnummer' ? 'het' : 'de';
+  const body = el(`<div class="live">
+    <video playsinline muted autoplay></video>
+    <div class="live-center">
+      <div class="live-hint">Richt het kader op ${the} ${esc(subject)}</div>
+      <div class="live-frame"></div>
+      <div class="live-result"><div class="live-status"><span class="spinner"></span>Camera starten…</div></div>
     </div>
-    <div id="sc-result"></div>
-    <div class="group-footer" style="padding:0 32px 24px;text-align:center">Tip: op een iPhone kun je ook in het tekstveld tikken en <b>Scan tekst</b> kiezen om de tekst rechtstreeks met de camera over te nemen.</div>
-    <input type="file" accept="image/*" capture="environment" id="sc-file-camera" class="hidden">
-    <input type="file" accept="image/*" id="sc-file-library" class="hidden">
+    <div class="live-tools">
+      <button type="button" class="live-tool" id="lv-photo">${icon('camera')}<span>Foto</span></button>
+      <button type="button" class="live-tool hidden" id="lv-zoom"><b>1×</b><span>Zoom</span></button>
+      <button type="button" class="live-tool hidden" id="lv-torch">${icon('flash')}<span>Lamp</span></button>
+    </div>
   </div>`);
-  const sheet = openSheet({ title, left: { label: 'Annuleer' }, body, onClose: () => { ocrProgress = null; } });
-  $('#sc-camera', body).addEventListener('click', () => $('#sc-file-camera', body).click());
-  $('#sc-library', body).addEventListener('click', () => $('#sc-file-library', body).click());
-  for (const id of ['#sc-file-camera', '#sc-file-library']) {
-    $(id, body).addEventListener('change', e => { if (e.target.files[0]) recognize(e.target.files[0]); e.target.value = ''; });
+  let stream = null;
+  let running = true;
+  const sheet = openSheet({
+    title: `${capitalize(subject)} scannen`, full: true, dark: true,
+    left: { label: 'Annuleer' }, body,
+    onClose: () => { running = false; stream?.getTracks().forEach(t => t.stop()); },
+  });
+  sheet.el.classList.add('live-sheet');
+  const video = $('video', body);
+  const frame = $('.live-frame', body);
+  const result = $('.live-result', body);
+  const setStatus = (text, busy = false) => {
+    result.innerHTML = `<div class="live-status">${busy ? '<span class="spinner"></span>' : ''}${esc(text)}</div>`;
+  };
+  const clean = text => subject === 'werfnummer' ? cleanNumber(text) : text;
+  const take = text => { onScan(clean(text)); sheet.close(); };
+
+  // Overschakelen naar een foto (handig bij kleine tekst of handschrift).
+  $('#lv-photo', body).addEventListener('click', () => takePhoto(file => {
+    sheet.close();
+    openScanResult(subject, file, onScan);
+  }));
+
+  start();
+
+  async function start() {
+    getOcrWorker().catch(() => {});
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      });
+    } catch (err) {
+      console.warn(err);
+      if (!running) return;
+      result.innerHTML = `<div class="live-status">Geen toegang tot de camera. Geef toegang via Instellingen › Safari › Camera, of neem een foto.</div>
+        <button type="button" class="live-pick" id="lv-photo2">${icon('camera')} Foto nemen</button>`;
+      $('#lv-photo2', result).addEventListener('click', () => $('#lv-photo', body).click());
+      return;
+    }
+    if (!running) { stream.getTracks().forEach(t => t.stop()); return; }
+    video.srcObject = stream;
+    try { await video.play(); } catch { /* start vanzelf */ }
+    setupTools(stream.getVideoTracks()[0]);
+    setStatus('Tekstherkenning starten…', true);
+    loop();
   }
 
-  async function recognize(file) {
-    const result = $('#sc-result', body);
-    $('.scan-intro', body).classList.add('hidden');
-    $('#sc-camera', body).innerHTML = `${icon('camera')}Nieuwe foto`;
-    result.innerHTML = '<div class="scan-status"><span class="spinner"></span><span id="sc-msg">Foto laden…</span></div>';
-
-    // Verkleinen: sneller herkennen, en scherp genoeg voor tekst.
-    let canvas;
-    try {
-      const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => createImageBitmap(file));
-      const scale = Math.min(1, 1800 / Math.max(bitmap.width, bitmap.height));
-      canvas = document.createElement('canvas');
-      canvas.width = Math.round(bitmap.width * scale);
-      canvas.height = Math.round(bitmap.height * scale);
-      canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    } catch {
-      result.innerHTML = '<div class="scan-status">Deze foto kan niet geopend worden.</div>';
-      return;
+  /** Zoom en lamp, als het toestel ze ondersteunt. */
+  function setupTools(track) {
+    const caps = track?.getCapabilities?.() ?? {};
+    if (caps.zoom && caps.zoom.max >= 2) {
+      const btn = $('#lv-zoom', body);
+      const levels = [Math.max(1, caps.zoom.min), 2, Math.min(3, caps.zoom.max)].filter((v, i, a) => a.indexOf(v) === i);
+      let i = 0;
+      btn.classList.remove('hidden');
+      btn.addEventListener('click', () => {
+        i = (i + 1) % levels.length;
+        track.applyConstraints({ advanced: [{ zoom: levels[i] }] }).catch(() => {});
+        $('b', btn).textContent = `${levels[i]}×`;
+      });
     }
+    if (caps.torch) {
+      const btn = $('#lv-torch', body);
+      let on = false;
+      btn.classList.remove('hidden');
+      btn.addEventListener('click', () => {
+        on = !on;
+        track.applyConstraints({ advanced: [{ torch: on }] }).catch(() => {});
+        btn.classList.toggle('on', on);
+      });
+    }
+  }
 
-    const msg = () => $('#sc-msg', body);
-    ocrProgress = m => {
-      if (!msg()) return;
-      if (m.status === 'recognizing text') msg().textContent = `Tekst herkennen… ${Math.round(m.progress * 100)}%`;
-      else if (/load|initializ/i.test(m.status)) msg().textContent = 'Tekstherkenning starten…';
-    };
+  /** Het stuk van het camerabeeld dat in het kader staat (de video vult het scherm met object-fit: cover). */
+  function frameCrop() {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return null;
+    const v = video.getBoundingClientRect();
+    const f = frame.getBoundingClientRect();
+    const scale = Math.max(v.width / vw, v.height / vh);
+    const dx = (v.width - vw * scale) / 2, dy = (v.height - vh * scale) / 2;
+    const x = (f.left - v.left - dx) / scale, y = (f.top - v.top - dy) / scale;
+    const w = f.width / scale, h = f.height / scale;
+    // Vergroten of verkleinen tot een hoogte waarbij de tekst goed leesbaar is.
+    const k = Math.min(3, 120 / h);
+    return cropCanvas(video, x, y, w, h, k, 10);
+  }
+
+  // Laatste uitkomsten: een tekst die twee keer na elkaar gelezen wordt, is zeker.
+  let last = '';
+  let shown = '';
+  async function loop() {
+    let variant = 0;
+    while (running) {
+      if (document.hidden || video.readyState < 2) { await new Promise(r => setTimeout(r, 300)); continue; }
+      const crop = frameCrop();
+      if (!crop) { await new Promise(r => setTimeout(r, 200)); continue; }
+      try {
+        const gray = stretchContrast(grayPixels(crop));
+        // Om beurten grijs en zwart-wit (tegen schaduw en glans).
+        const pixels = variant++ % 2 ? adaptiveThreshold(gray, crop.width, crop.height, 60) : gray;
+        const data = await ocr(grayCanvas(pixels, crop.width, crop.height), 7);
+        if (!running) return;
+        const line = ocrLines(data, 0).sort((a, b) => b.conf - a.conf)[0];
+        const text = line && (data.confidence ?? 0) >= 45 ? line.text : '';
+        if (text) {
+          const sure = text === last;
+          last = text;
+          if (sure || !shown) show(line, sure);
+        } else {
+          last = '';
+          if (!shown) setStatus(`Zoeken naar tekst…`);
+        }
+      } catch (err) {
+        console.error(err);
+        if (!running) return;
+        setStatus('Tekst herkennen is mislukt. Neem een foto.');
+        return;
+      }
+      await new Promise(r => setTimeout(r, 80));
+    }
+  }
+
+  function show(line, sure) {
+    if (line.text === shown && !sure) return;
+    shown = line.text;
+    const words = line.words.length > 1 ? line.words : [];
+    result.innerHTML = `<button type="button" class="live-pick ${sure ? 'sure' : ''}">${esc(clean(line.text))}</button>
+      ${words.length ? `<div class="live-words">${words.map(w => `<button type="button">${esc(clean(w))}</button>`).join('')}</div>` : ''}
+      <div class="live-status small">Tik om over te nemen</div>`;
+    $('.live-pick', result).addEventListener('click', () => take(line.text));
+    $$('.live-words button', result).forEach((b, i) => b.addEventListener('click', () => take(words[i])));
+  }
+}
+
+function openScanResult(subject, firstFile, onScan) {
+  const body = el(`<div>
+    <div class="scan-status" id="sc-status"></div>
+    <div class="scan-stage hidden" id="sc-stage"></div>
+    <div class="scan-choices" id="sc-choices"></div>
+    <div class="content"><button class="btn tinted" type="button" id="sc-again">${icon('camera')}Nieuwe foto</button></div>
+    <div class="group-footer" style="padding:0 32px 24px;text-align:center">Lukt het niet, bijvoorbeeld bij handschrift? Tik dan in het tekstveld en kies <b>Scan tekst</b> van je iPhone.</div>
+  </div>`);
+  const sheet = openSheet({ title: `${capitalize(subject)} scannen`, left: { label: 'Annuleer' }, body });
+  const status = $('#sc-status', body);
+  const stage = $('#sc-stage', body);
+  const choices = $('#sc-choices', body);
+  const the = subject === 'werfnummer' ? 'het' : 'de';
+  const setStatus = (text, busy = false) => { status.innerHTML = `${busy ? '<span class="spinner"></span>' : ''}${esc(text)}`; };
+  const finish = text => {
+    onScan(subject === 'werfnummer' ? cleanNumber(text) : text);
+    sheet.close();
+  };
+  // Alleen het laatste verzoek telt (bij een nieuwe foto of een nieuwe tik).
+  let job = 0;
+  let photo = null;
+  let lineHeight = 0;
+
+  $('#sc-again', body).addEventListener('click', () => takePhoto(process));
+  process(firstFile);
+
+  async function process(file) {
+    const id = ++job;
+    stage.classList.add('hidden');
+    stage.innerHTML = '';
+    choices.innerHTML = '';
+    setStatus('Foto laden…', true);
+    let img;
+    try { img = await loadPhoto(file); } catch (err) { setStatus(err.message); return; }
+
+    // Volledige foto (max. 3200 px) om stukken scherp uit te knippen; kleinere versie om tekst te zoeken.
+    const full = Math.min(1, 3200 / Math.max(img.naturalWidth, img.naturalHeight));
+    photo = cropCanvas(img, 0, 0, img.naturalWidth, img.naturalHeight, full);
+    const small = Math.min(1, 1600 / Math.max(photo.width, photo.height));
+    const view = cropCanvas(photo, 0, 0, photo.width, photo.height, small);
+    stage.appendChild(view);
+    stage.classList.remove('hidden');
+    if (id !== job) return;
+
+    setStatus('Tekst zoeken…', true);
     let lines;
     try {
-      if (msg()) msg().textContent = 'Tekstherkenning starten…';
-      const worker = await getOcrWorker();
-      const { data } = await worker.recognize(canvas, {}, { text: true, blocks: true });
-      lines = ocrLines(data);
+      const gray = stretchContrast(grayPixels(view));
+      lines = ocrLines(await ocr(grayCanvas(gray, view.width, view.height), 11), 15);
     } catch (err) {
       console.error(err);
-      result.innerHTML = '<div class="scan-status">Tekst herkennen is mislukt. Probeer opnieuw of typ de tekst in.</div>';
+      if (id === job) setStatus('Tekst herkennen is mislukt. Probeer opnieuw of typ de tekst in.');
       return;
     }
+    if (id !== job) return;
 
-    if (!lines.length) {
-      result.innerHTML = '<div class="scan-status">Geen tekst gevonden. Neem een scherpere foto van dichterbij, of typ de tekst in.</div>';
-      return;
-    }
-    result.innerHTML = `<div class="scan-status">Tik op de ${esc(subject)}.</div><div class="scan-stage"></div><div class="scan-choices" id="sc-choices"></div>`;
-    const stage = $('.scan-stage', result);
-    stage.appendChild(canvas);
-    lines.forEach((line, i) => {
+    const heights = lines.map(l => (l.bbox.y1 - l.bbox.y0) / small).sort((a, b) => a - b);
+    lineHeight = heights.length ? heights[Math.floor(heights.length / 2)] : photo.height * 0.03;
+    for (const line of lines) {
       const b = line.bbox;
       const box = el(`<button class="scan-box" type="button" aria-label="${esc(line.text)}"></button>`);
       Object.assign(box.style, {
-        left: `${b.x0 / canvas.width * 100}%`, top: `${b.y0 / canvas.height * 100}%`,
-        width: `${(b.x1 - b.x0) / canvas.width * 100}%`, height: `${(b.y1 - b.y0) / canvas.height * 100}%`,
+        left: `${b.x0 / view.width * 100}%`, top: `${b.y0 / view.height * 100}%`,
+        width: `${(b.x1 - b.x0) / view.width * 100}%`, height: `${(b.y1 - b.y0) / view.height * 100}%`,
       });
-      box.addEventListener('click', () => choose(i));
+      box.addEventListener('click', e => {
+        e.stopPropagation();
+        $$('.scan-box', stage).forEach(x => x.classList.toggle('sel', x === box));
+        readRegion(b.x0 / small, b.y0 / small, (b.x1 - b.x0) / small, (b.y1 - b.y0) / small, line);
+      });
       stage.appendChild(box);
-    });
-
-    // Na een tik: de hele regel of één woord eruit kiezen.
-    function choose(i) {
-      $$('.scan-box', stage).forEach((b, j) => b.classList.toggle('sel', i === j));
-      const line = lines[i];
-      const options = [line.text, ...(line.words.length > 1 ? line.words : [])];
-      const choices = $('#sc-choices', result);
-      choices.innerHTML = '';
-      for (const text of [...new Set(options)]) {
-        const btn = el(`<button type="button">${esc(text)}</button>`);
-        btn.addEventListener('click', () => { onScan(text); sheet.close(); });
-        choices.appendChild(btn);
-      }
-      choices.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
+    setStatus(lines.length ? `Tik op ${the} ${subject} op de foto.` : `Tik op ${the} ${subject} op de foto, of neem een scherpere foto van dichterbij.`);
+  }
+
+  // Tik naast de kaders: lees een strook rond die plek.
+  stage.addEventListener('click', e => {
+    if (!photo || e.target.closest('.scan-box')) return;
+    const rect = stage.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width * photo.width;
+    const y = (e.clientY - rect.top) / rect.height * photo.height;
+    $$('.scan-box', stage).forEach(b => b.classList.remove('sel'));
+    const h = Math.max(lineHeight * 1.6, photo.height * 0.02);
+    const w = photo.width * 0.7;
+    readRegion(x - w / 2, y - h / 2, w, h, null);
+  });
+
+  /** Leest een stuk van de foto opnieuw, op volle scherpte en vergroot. */
+  async function readRegion(x, y, w, h, line) {
+    const id = ++job;
+    const options = new Set();
+    if (line) options.add(line.text);
+    showChoices(options, true);
+    try {
+      // Rand rond de tekst, en vergroten tot ongeveer 48 px letterhoogte.
+      const padY = h * 0.4, padX = h * 0.8;
+      const scale = Math.min(4, Math.max(1, 48 / h), 2400 / (w + padX * 2));
+      const crop = cropCanvas(photo, x - padX, y - padY, w + padX * 2, h + padY * 2, scale, 12);
+      const gray = stretchContrast(grayPixels(crop));
+      const mode = line ? 7 : 6;
+      // Twee versies (grijs en zwart-wit); de zekerste uitkomst wint.
+      const results = [];
+      for (const variant of [gray, adaptiveThreshold(gray, crop.width, crop.height, Math.round(48 * 1.5))]) {
+        const data = await ocr(grayCanvas(variant, crop.width, crop.height), mode);
+        if (id !== job) return;
+        results.push(data);
+      }
+      const best = results.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0];
+      const found = ocrLines(best, 10);
+      options.clear();
+      for (const l of found) {
+        options.add(l.text);
+        if (l.words.length > 1) l.words.forEach(word => options.add(word));
+      }
+      if (!options.size && line) options.add(line.text);
+    } catch (err) {
+      console.error(err);
+    }
+    if (id !== job) return;
+    showChoices(options, false);
+  }
+
+  function showChoices(options, busy) {
+    choices.innerHTML = '';
+    if (busy) {
+      choices.innerHTML = '<div class="scan-status" style="padding:4px"><span class="spinner"></span>Lezen…</div>';
+      choices.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      return;
+    }
+    if (!options.size) {
+      choices.innerHTML = '<div class="scan-status" style="padding:4px">Hier is geen tekst gevonden. Tik precies op de tekst.</div>';
+      return;
+    }
+    for (const text of options) {
+      const btn = el(`<button type="button">${esc(subject === 'werfnummer' ? cleanNumber(text) : text)}</button>`);
+      btn.addEventListener('click', () => finish(text));
+      choices.appendChild(btn);
+    }
+    choices.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 }
 

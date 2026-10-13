@@ -1,6 +1,6 @@
 // Bewaart de app op het toestel, zodat hij ook zonder internet werkt.
 // Verhoog VERSION bij elke nieuwe versie: dan haalt de app de nieuwe bestanden op.
-const VERSION = 'timer-v2';
+const VERSION = 'timer-v4';
 const FILES = [
   './',
   'index.html',
@@ -19,6 +19,7 @@ const FILES = [
   'vendor/tesseract/tesseract-core-simd-lstm.wasm.js',
   'vendor/tesseract/tesseract-core-lstm.wasm.js',
   'vendor/tesseract/lang/eng.traineddata.gz',
+  'vendor/tesseract/lang/nld.traineddata.gz',
 ];
 
 self.addEventListener('install', event => {
