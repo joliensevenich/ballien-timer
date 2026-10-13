@@ -1,42 +1,27 @@
-# e. baillien - Timer (webversie)
+# UrenLog (e.baillien)
 
-Dezelfde urenregistratie als de iPhone-app, maar als webapp. Je hebt geen Apple Developer-account en geen Xcode nodig.
-Werkt op iPhone, Android en computer, ook offline.
+Urenregistratie voor iPhone (SwiftUI + SwiftData, iOS 17+), met iCloud-sync en export naar Excel en PDF.
 
-- **Uren blijven op het toestel** van elke gebruiker, nooit op een server. Iedereen met de link heeft zijn eigen, aparte gegevens.
-- **Back-ups** zijn uitwisselbaar met de iPhone-app: een back-up uit de iPhone-app kun je hier terugzetten en omgekeerd.
-- Excel en PDF in de layout van het **Weekrapport - Atelier**, net als in de iPhone-app.
+## Functies
+- **Klok**: in- en uitklokken, of **uren manueel invoeren** (datum, beginuur, einduur). Je laatst ingevoerde uren worden onthouden. Per registratie vul je de **werfnaam** en het **werfnummer** in (typen of **scannen met de camera**; de werfnaam is gewone tekst per registratie, er wordt geen lijst van werven bijgehouden),
+  en kies je het **uitgevoerde werk** (Allerlei, Zagen, Afplakken, CNC, Monteren), zet je **privéwerk** aan of uit, en vul je eventueel een notitie in.
+- **Uren**: lijst per maand met maandtotaal, datums als cijfers (03-10-2026). Toevoegen, bewerken, verwijderen. Filters altijd zichtbaar bovenaan: alles, per week of per maand (met pijltjes naar vorige/volgende), zoeken op werfnaam of werfnummer, werk of privé, uitgevoerd werk, met het totaal van wat getoond wordt.
+- **Rapport**: kies **Werk** of **Privé** (privéwerk komt nooit op het gewone rapport; het privérapport heet WEEKRAPPORT/MAANDRAPPORT - PRIVÉ), periode kiezen, filteren op werfnummer en werfnaam, totalen per uitgevoerd werk en per werfnummer.
+  Export naar **Excel (.xlsx)** en **PDF** in de layout van het papieren **Weekrapport - Atelier**: één tabblad
+  (Excel) of pagina (PDF) per week, werven in de volgorde van de week, uren per dag met de code van het werk.
+- **Back-up**: in Instellingen een back-upbestand (.json) met alle uren, je naam, de keuzelijst Uitgevoerde werken en de instellingen (herinnering, standaarduren) **delen** (WhatsApp, mail, …) of **opslaan op het toestel**,
+  en later terugzetten (samenvoegen of alles vervangen). Met de **wekelijkse herinnering** krijg je op een gekozen
+  dag en uur een melding; tik erop om meteen te delen of op te slaan.
+- Uren worden **exact in minuten** geteld, zonder afronding, en in Excel en PDF getoond als uren:minuten (9:45).
 
-Verschillen met de iPhone-app:
-- **Scannen**: neem een foto van het papier en tik daarna op de tekst (op een iPhone kan ook: in het tekstveld tikken en *Scan tekst* kiezen).
-- **Wekelijkse herinnering**: een website kan geen melding plannen. De app vraagt om een back-up wanneer je hem opent nadat het gekozen moment voorbij is.
+## Op je iPhone zetten
+1. Open `UrenLog.xcodeproj` in Xcode.
+2. Target **UrenLog** > **Signing & Capabilities** > kies je Apple-account bij *Team*.
+3. Sluit je iPhone aan, kies hem bovenin als bestemming en druk op ▶︎.
 
-## Online zetten met GitHub Pages (gratis)
+Scannen werkt alleen op een echte iPhone (XS/XR of nieuwer), niet in de simulator.
 
-1. Maak een account op [github.com](https://github.com).
-2. Klik rechtsboven op **+** › **New repository**. Geef een naam, bijvoorbeeld `timer`, kies **Public** en klik **Create repository**.
-3. Klik op **uploading an existing file** en sleep **de inhoud van deze map `web`** in het venster: `index.html`, `manifest.webmanifest`, `sw.js`,
-   `logo.png`, `logo_excel.png` en de mappen `icons`, `js` en `vendor`. Klik **Commit changes**.
-4. Ga naar **Settings** › **Pages**. Kies bij *Branch* **main** en **/ (root)** en klik **Save**.
-5. Na een minuutje staat de app op `https://<jouw-gebruikersnaam>.github.io/timer/`.
-
-Alleen de lege app staat online; de uren van gebruikers komen daar nooit.
-
-## Op de iPhone zetten
-
-1. Open de link in **Safari**.
-2. Tik op het deel-icoon en kies **Zet op beginscherm**.
-3. Open de app voortaan via het icoon. Hij werkt dan ook zonder internet.
-
-Zet de app echt op het beginscherm: in een gewoon Safari-tabblad mag iOS de gegevens wissen van een website die je 7 dagen
-niet gebruikt. Een app op het beginscherm valt niet onder die regel. Op een iPhone toont de app in Safari daarom eerst hoe je hem
-op het beginscherm zet. In *Instellingen › Opslag* zie je of de uren beschermd zijn tegen automatisch wissen.
-De wekelijkse back-upherinnering staat standaard aan.
-
-Overstappen van de iPhone-app: maak daar in Instellingen een back-up, en zet die in de webapp terug via *Instellingen › Back-up terugzetten*.
-
-## Een nieuwe versie online zetten
-
-1. Verhoog in `sw.js` het nummer in `const VERSION = 'timer-v2'` (bijvoorbeeld naar `timer-v3`).
-2. Upload de gewijzigde bestanden opnieuw naar GitHub.
-3. Gebruikers krijgen de nieuwe versie de tweede keer dat ze de app openen terwijl ze internet hebben.
+### iCloud
+iCloud-sync (CloudKit) vereist een **betaald Apple Developer-account** (€ 99/jaar).
+Met een gratis account verwijder je onder *Signing & Capabilities* **iCloud** en **Push Notifications**;
+de app bewaart de uren dan alleen op het toestel.
