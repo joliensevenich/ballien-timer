@@ -1,6 +1,6 @@
 // Bewaart de app op het toestel, zodat hij ook zonder internet werkt.
 // Verhoog VERSION bij elke nieuwe versie: dan haalt de app de nieuwe bestanden op.
-const VERSION = 'timer-v7';
+const VERSION = 'timer-v8';
 const FILES = [
   './',
   'index.html',

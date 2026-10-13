@@ -1500,6 +1500,17 @@ function openLiveScanner(subject, onScan) {
   // Laatste uitkomsten: een tekst die twee keer na elkaar gelezen wordt, is zeker.
   let last = '';
   let shown = '';
+  // Tik op het kader: vorige uitkomst weg en opnieuw lezen. Een lezing die al bezig was, telt niet meer.
+  let round = 0;
+  frame.addEventListener('click', () => {
+    round++;
+    last = '';
+    shown = '';
+    setStatus('Opnieuw scannen…', true);
+    frame.classList.remove('flash');
+    void frame.offsetWidth;
+    frame.classList.add('flash');
+  });
   async function loop() {
     let variant = 0;
     while (running) {
@@ -1510,8 +1521,10 @@ function openLiveScanner(subject, onScan) {
         const gray = stretchContrast(grayPixels(crop));
         // Om beurten grijs en zwart-wit (tegen schaduw en glans).
         const pixels = variant++ % 2 ? adaptiveThreshold(gray, crop.width, crop.height, 60) : gray;
+        const myRound = round;
         const data = await ocr(grayCanvas(pixels, crop.width, crop.height), 7);
         if (!running) return;
+        if (myRound !== round) continue;
         const line = ocrLines(data, 0).sort((a, b) => b.conf - a.conf)[0];
         const text = line && (data.confidence ?? 0) >= 45 ? line.text : '';
         if (text) {
@@ -1520,7 +1533,7 @@ function openLiveScanner(subject, onScan) {
           if (sure || !shown) show(line, sure);
         } else {
           last = '';
-          if (!shown) setStatus(`Zoeken naar tekst…`);
+          if (!shown) setStatus('Zoeken naar tekst…', true);
         }
       } catch (err) {
         console.error(err);
@@ -1538,7 +1551,7 @@ function openLiveScanner(subject, onScan) {
     const words = line.words.length > 1 ? line.words : [];
     result.innerHTML = `<button type="button" class="live-pick ${sure ? 'sure' : ''}">${esc(clean(line.text))}</button>
       ${words.length ? `<div class="live-words">${words.map(w => `<button type="button">${esc(clean(w))}</button>`).join('')}</div>` : ''}
-      <div class="live-status small">Tik om over te nemen</div>`;
+      <div class="live-status small">Tik om over te nemen · tik op het kader om opnieuw te scannen</div>`;
     $('.live-pick', result).addEventListener('click', () => take(line.text));
     $$('.live-words button', result).forEach((b, i) => b.addEventListener('click', () => take(words[i])));
   }

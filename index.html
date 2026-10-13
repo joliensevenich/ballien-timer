@@ -371,8 +371,10 @@ input[type=date]::-webkit-date-and-time-value, input[type=time]::-webkit-date-an
 }
 .live-frame {
   width: 100%; aspect-ratio: 4.2 / 1; border: 3px solid #fff; border-radius: 14px;
-  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .5);
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .5); cursor: pointer;
 }
+.live-frame.flash { animation: frame-flash .6s ease; }
+@keyframes frame-flash { 0% { border-color: #ffd60a; background: rgba(255, 214, 10, .25); } 100% { border-color: #fff; background: transparent; } }
 .live-hint {
   position: relative; z-index: 1; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
   background: rgba(0, 0, 0, .55); color: #fff; font-size: 15px; padding: 7px 14px; border-radius: 999px;

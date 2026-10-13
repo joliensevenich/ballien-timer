@@ -8,7 +8,7 @@ Werkt op iPhone, Android en computer, ook offline.
 - Excel en PDF in de layout van het **Weekrapport - Atelier**, net als in de iPhone-app.
 
 Verschillen met de iPhone-app:
-- **Scannen**: het scanicoontje opent meteen de camera met een richtkader; de tekst in het kader wordt live gelezen en met één tik overgenomen. Via *Foto* kan het ook met een foto. De tekstscanner van Apple zelf kan een website niet openen; die herkent wel beter.
+- **Scannen**: het scanicoontje opent meteen de camera met een richtkader; de tekst in het kader wordt live gelezen en met één tik overgenomen; tik op het kader om opnieuw te scannen. Via *Foto* kan het ook met een foto. De tekstscanner van Apple zelf kan een website niet openen; die herkent wel beter.
 - **Wekelijkse herinnering**: een website kan geen melding plannen. De app vraagt om een back-up wanneer je hem opent nadat het gekozen moment voorbij is.
 
 ## Online zetten met GitHub Pages (gratis)
@@ -37,7 +37,7 @@ Overstappen van de iPhone-app: maak daar in Instellingen een back-up, en zet die
 
 ## Een nieuwe versie online zetten
 
-1. Verhoog in `sw.js` het nummer in `const VERSION = 'timer-v7'` (bijvoorbeeld naar `timer-v8`). Zonder nieuw nummer krijgen gebruikers de nieuwe versie niet.
+1. Verhoog in `sw.js` het nummer in `const VERSION = 'timer-v8'` (bijvoorbeeld naar `timer-v9`). Zonder nieuw nummer krijgen gebruikers de nieuwe versie niet.
 2. Upload de gewijzigde bestanden opnieuw naar GitHub. GitHub zet ze binnen 1 à 2 minuten online (zie het tabblad *Actions*).
 3. De app kijkt telkens hij geopend wordt of er een nieuwe versie is, haalt die op de achtergrond op en vernieuwt zichzelf
    zodra je niets aan het invullen bent. Je uren blijven daarbij gewoon bewaard.
